@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+<head><title>SVG Translate - JS Prototype</title></head>
+<body>
+    <p><a href="https://commons.wikimedia.org/wiki/Category:SVG_with_multiple_translations_with_contributions_from_Aeroid">Some Examples</a> | <a href="https://www.diffchecker.com/">diff</a></p>
+    <textarea name="SVGOUT" cols="120" rows="25"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" font-family="DejaVu Sans,sans-serif" font-stretch="condensed" font-weight="bold">
+  <rect x="10%" y="10%" width="80%" height="80%" stroke-width="4px" fill="lightgray" stroke="green"/>
+  <!-- switch -->
+   <g>
+    <text x="50%" y="50%" text-anchor="middle" dy=".3em">Translate me!</text>
+   </g>
+  <!-- /switch -->
+  
+<!--
+This is just very simple example. Hit the checkbox below ... Play around and use more complex examples.
+-->
+</svg>
+</textarea></br>
+	<input name="EDITABLE" type="checkbox" onChange="edit(this.checked)"/> Editable</br>
+    <div id="EDIT"></div>
+    <script>
+		// 
+		// SVG switch/systemLanguage allows for translation
+		// text/tspan can make this a text-only translation process
+		// this is js-tooling to expose these SVG data structures for easy access
+		// it allows text-only changes per element and language
+		// and adding new languages based on prepared defaults
+		//
+		// simplest precondition:
+		// text element within a switch element
+		// 
+		// this will enable to replicate the text in-place for a new language
+		//
+		// more complex scenarios supported are
+		//  - multiple switch elements
+		//  - g / text / tspan combinations
+		//
+        const parser = new DOMParser();
+
+        var svgdom = "";
+        var strings = {};
+        var nstr = 1;
+        var langs = [];
+        var editors = [];
+        var defaultLang = -1;
+       
+        function setSVGcode(code) {
+		// unparse XML into textarea
+			if (code.startsWith("<"+"?")) 
+				document.getElementsByName("SVGOUT")[0].value = code;
+			else
+			    document.getElementsByName("SVGOUT")[0].value = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + code;
+        }
+		
+		function getSVGcode() {
+		// get SVG code from textarea
+			return document.getElementsByName("SVGOUT")[0].value;
+		}
+		
+		function addLanguage(lang) {
+		// register a new language or return index for existing language
+			if (typeof langs[lang] === "undefined") {
+                var l = numOfLanguages();
+				langs[lang] = l;
+				editors[l] = [];
+			}
+			//console.log("lang: "+langs[lang]);
+			return langs[lang];
+		}
+		
+		function numOfLanguages() {
+		// return number of registered languages
+			return Object.keys(langs).length;
+		}
+
+		function languageByIndex(i) {
+		// return language label by index
+			return Object.keys(langs)[i];
+		}
+
+        function edit(makeEditable) {
+            var ed = document.getElementById("EDIT");
+            if (makeEditable) {
+			// turn on editing by parsing the SVG code, annotate the DOM for structured editing
+                strings = {};
+                nstr = 1;
+                langs = {};
+                editors = [];
+                defaultLang = [];
+				// parse SVG
+                svgdom = parser.parseFromString(getSVGcode(), "image/svg+xml");
+                const errorNode = svgdom.querySelector('parsererror');
+                if (errorNode) {
+                    console.log("SVG parsing from textarea failed");
+                } else {
+				// find text to be edited and group them by language
+				// TO DO: WILL NOT work for single children for multiple languages (e.g. "fr, it, de")
+                    var switches = svgdom.getElementsByTagName('switch');
+					for (var sw = 0; sw < switches.length ; sw++) {
+						for (var i = 0; i < switches[sw].childElementCount; i++) {
+							if (getSystemLanguageStrings(switches[sw].children[i], false) === "") {
+								defaultLang.push(newString(switches[sw].children[i],false));
+							}
+						}
+					}
+					// show the SVG code annotated with editor IDs 
+                    setSVGcode(svgdom.documentElement.outerHTML);
+                }
+				if (numOfLanguages() < 1) {
+					alert("Sorry, are there really <switch> elements in the SVG, that you want to edit?");
+					document.getElementsByName("EDITABLE")[0].checked = false;
+				}
+				// create the editor from the languages
+                var edtab = document.createElement("table");
+                ed.appendChild(edtab);
+                for (var row = numOfLanguages()-1; row >= 0 ; row--) {
+                    edtab.appendChild(addEditLine(row));
+                }
+            } else {
+			// finalize editing by removing annotated IDs and create SVG code
+				if (ed.childNodes.length > 0) {
+					ed.removeChild(ed.childNodes[0]);
+                    for (var dl = 0; dl < defaultLang.length; dl++) {
+                        removeId(defaultLang[dl]);
+                    }
+					for (var row = numOfLanguages()-1; row >= 0 ; row--) {
+						for (var col = 0; col < editors[row].length; col++) {
+							//console.log("editors["+ row +"]["+ col +"]:"+ editors[row][col]);
+							removeId(editors[row][col]);
+						}
+					}
+					setSVGcode(svgdom.documentElement.outerHTML);	
+				}
+            }
+        }
+
+        function removeId(id) {
+		// for an element, remove the editor ID and put back original IDs if existing
+            var sid = svgdom.getElementById(id);
+            if ( typeof sid !== 'undefined' && sid !== null ) {
+				if ( typeof sid.attributes["OLDid"]  !== 'undefined' ) {
+					sid.setAttribute("id", sid.attributes["OLDid"].value);
+					sid.removeAttribute("OLDid");
+				} else {
+					sid.removeAttribute("id");
+				}
+			}
+        }
+
+        function newString(strElem, replace) {
+		// for an element, create a editor ID and save the original ID for restoration later within DOM
+		// replacement of IDs needed for clones from defaultLang
+            var label = "Aaa-" + (nstr++) + "-zzZ";
+			//console.log(label);
+            strings[label] = strElem.value;
+            if (! replace) 
+                if (typeof strElem.attributes["id"]  !== 'undefined') 
+                    strElem.setAttribute("OLDid", strElem.attributes["id"].value);
+            strElem.setAttribute("id", label);
+            return label;
+        }
+		
+		function addEditor(li, textElem, replace) {
+		// add an ediotr ID to a language (by index)
+		// replacement of IDs needed for clones from defaultLang
+			//console.log("li: "+li+" textElem: "+textElem);
+			editors[li].push(newString(textElem, replace));
+		}
+
+        function getSystemLanguageStrings(elem, replace) {
+		// for each immediate element (elem) underneath a switch element, find all text/tspan elements and register them for editing
+		// assigned to the language. This child (elem) could be a <g> or a <text>. It could come from the parse or a newly added 
+		// clone from default (which might need removal of existing IDs -> replace)
+            var lang = "";
+            if (typeof elem.attributes["systemLanguage"] !== 'undefined')
+                lang = elem.attributes["systemLanguage"].value;
+            var li = addLanguage(lang);
+            var txts = [];
+            if ( elem.tagName === "text" ) 
+                txts[0] = elem;
+            else
+                txts = elem.getElementsByTagName('text');
+            if (typeof txts !== 'undefined' && txts.length > 0) {
+                for (var t = 0; t < txts.length; t++) {
+                    var spans = txts[t].getElementsByTagName('tspan');
+                    if (typeof spans !== 'undefined' && spans.length > 0) {
+                        for (var s = 0; s < spans.length; s++) {
+							addEditor(li, spans[s], replace);
+                        }
+                    } else {
+						addEditor(li, txts[t], replace);
+                    }
+                }
+            } else {
+                console.log("(no text)");
+            }
+            return lang;
+        }
+
+        function update(label, value) {
+		// update the DOM after edit by the editor ID
+            //console.log(label, value);
+            svgdom.getElementById(label).textContent = value;
+            setSVGcode(svgdom.documentElement.outerHTML);
+        }
+
+        function addEditLine(row) {
+		// add all editors for a single language
+		// 
+			//console.log("addEditLine: "+row);
+            var tr = document.createElement("tr");
+            var th = document.createElement("th");
+            tr.appendChild(th);
+            if (languageByIndex(row) != "")
+                th.textContent=languageByIndex(row);
+            else {
+				// the default language line (without lang code) will host the button to clone a new language from
+                tr.setAttribute("id","defaultLang");
+                var inp = document.createElement("input");
+                th.appendChild(inp);
+                inp.setAttribute("Type", "button");
+                inp.setAttribute("Value", "+");
+                inp.setAttribute("onClick", "addLang(prompt('Whats the two-letter code of the new language you want to add?'))");
+            }
+            for (var col = 0; col < editors[row].length; col++) {
+                //console.log("editors["+ row +"]["+ col +"]:"+ editors[row][col]);
+                var td = document.createElement("td");
+                tr.appendChild(td);
+                var inp = document.createElement("input");
+                td.appendChild(inp);
+                inp.setAttribute("Type", "text");
+                inp.setAttribute("Name", editors[row][col]);
+                inp.setAttribute("value", svgdom.getElementById(editors[row][col]).textContent);
+                inp.setAttribute("onChange", "update(this.name, this.value)");
+            }
+            return tr;
+        }
+
+        function removeAllIds(elem) {
+		// recursivly remove all IDs from a cloned element 
+            for ( var c = 0; c < elem.children.length; c++)
+                removeAllIds(elem.children[c]);
+            elem.removeAttribute("id");
+            elem.removeAttribute("OLDid");
+            //console.log(elem.outerHTML);
+        }
+
+        function addLang(lang) {
+		// clone from default language and add editors
+		// this could be a simple <g> element to be cloned or going through all <switch>es and clone each default
+            for (var dl = 0; dl < defaultLang.length; dl++) {
+                var def = svgdom.getElementById(defaultLang[dl]);
+                var defClone = def.cloneNode(true);
+                defClone.setAttribute("systemLanguage",lang);
+                removeAllIds(defClone);
+                def.before(defClone);
+                getSystemLanguageStrings(defClone,true);
+            }
+            var el = addEditLine(numOfLanguages()-1);
+            var defEdit = document.getElementById("defaultLang");
+            defEdit.after(el);
+
+            setSVGcode(svgdom.documentElement.outerHTML);
+        }
+
+		document.getElementsByName("EDITABLE")[0].checked = false;
+    </script>
+</body>
+</html>
